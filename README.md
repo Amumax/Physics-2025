@@ -1,1 +1,1 @@
-# Physics-2025-
+# MIPT_HSSE_Physics_2025
