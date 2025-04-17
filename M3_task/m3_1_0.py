@@ -1,174 +1,250 @@
+from matplotlib import lines
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 
-def thin_lens_image(
+
+H_out = 32 # считаем осью OY
+W_out = 32 # считаем осью OX
+
+class Line:
+    def __init__(self, x0, y0, z0, m, n, p):
+        self.offset = np.array([x0, y0, z0], dtype=float)
+        self.multiply = np.array([m, n, p], dtype=float)
+
+    def get_dot(self, t):
+        return self.offset + t * self.multiply
+
+    def intersection(self, other):
+        A = np.array([self.multiply, -other.multiply, np.cross(self.multiply, other.multiply)]).T
+        B = np.array(other.offset) - np.array(self.offset)
+        try:
+            t, s, _ = np.linalg.solve(A, B)
+        except np.linalg.LinAlgError:
+            return None
+        
+        return self.get_dot(t)
+    
+def make_lines_two_points(point_1, point_2):
+    return Line(*point_1, *(point_2 - point_1))
+    
+class Plane:
+    def __init__(self, A, B, C, D):
+        self.normal_vector = np.array([A, B, C])
+        self.free = D
+
+    def intersection_with_line(self, line):
+        t = -(np.dot(self.normal_vector, line.offset) + self.free) / np.dot(self.normal_vector, line.multiply)
+        return line.get_dot(t)
+    
+
+def thin_lens_image_input_lines(
     input_image: np.ndarray,
     f: float,
     a: float,
-    pixel_size: float = 1.0,
-    T: float = 1.0
 ):
-    """
-    Строит изображение, формируемое тонкой линзой с фокусным расстоянием f
-    при размещении предмета (input_image) на расстоянии a (центр линзы берем за x=0).
-    pixel_size — условный размер пикселя по оси y и x (для масштаба).
-    T — коэффициент пропускания (учет потерь).
-    
-    Возвращает (output_image, b, scale_out), где:
-    - output_image: 2D (или 3D) массив с итоговым изображением,
-    - b: рассчитанное расстояние от линзы до экрана/изображения (может быть < 0, если изображение мнимое),
-    - scale_out: масштаб (сколько пикселей входного изображения приходится на пиксель выходного).
-    """
-    # Размер входного изображения
-    H_in, W_in = input_image.shape[:2]  # если цветное, shape=(H,W,3)
-    
-    # Уравнение тонкой линзы: 1/a + 1/b = 1/f
-    # -> b = (a * f) / (a - f)
-    # Если a < f, то b < 0 => мнимое изображение (по эту же сторону линзы).
-    # Если a > f, то b > 0 => действительное изображение (с другой стороны).
-    # Для a=f → b → ∞ (либо "глаз на бесконечность")
-    
-    if abs(a - f) < 1e-9:
-        # Ситуация a ~ f: формально b -> бесконечность.
-        # Для наглядности берем большое b
-        b = 1e9
-    else:
+    H_in, W_in = input_image.shape[:2]
+    error = [0]
+    try:
         b = (a * f) / (a - f)
+    except ZeroDivisionError:
+        b = 1e9 # типо бесконечность 
     
-    # Линейное увеличение M = -b / a (знак показывает перевернутость)
-    M = - b / a
+
+    M = b / - a   # Увеличение изображение
+                # Если M > 0 то     перевернутое    действительное
+                # Если M < 0 то     прямое          мнимое
+
     
-    # Определим желаемый размер выходного изображения
-    # Пусть вых. картинка ограничена размерами H_out, W_out = int(abs(M)*H_in), int(abs(M)*W_in).
-    H_out = int(abs(M) * H_in)
-    W_out = int(abs(M) * W_in)
-    if H_out < 1 or W_out < 1:
-        H_out, W_out = 1, 1
-    
-    # Создадим массив для результата
-    # Если входное изображение 3-канальное (RGB), исходное shape = (H_in, W_in, 3)
-    # Иначе 2D (однотонное). Чтобы универсально, проверим ndim:
-    if input_image.ndim == 3:
-        output_image = np.zeros((H_out, W_out, 3), dtype=np.uint8)
-    else:
-        output_image = np.zeros((H_out, W_out), dtype=np.uint8)
-    
-    # Для упрощения считаем, что:
-    # - предмет лежит на плоскости x = -a (ось X направлена "горизонтально"),
-    # - линза в плоскости x=0,
-    # - экран (или виртуальная плоскость) в x = +b (может быть < 0, если мнимое изобр.)
-    # - ось Y перпендикулярна оптической оси, с пикс. размером pixel_size.
-    
-    # Центр предмета = (x=-a, y=0). Соответственно:
-    #   пиксел (i_in, j_in) => y_in = (i_in - H_in/2)*pixel_size, ...
-    # Аналогично для выходного изображения (i_out, j_out).
-    
-    # Для каждого пикселя выходного изображения (i_out, j_out) определим,
-    # откуда в предмете пришел соответствующий луч (i_in, j_in).
-    #
-    # Параксиальная оптика (малые углы): используем соотношения подобия
-    #   y_out / (b) = y_in / (a),  =>  y_in = y_out * (a / b).
-    # По вертикали: y_out = (i_out - H_out/2)*pixel_size.
-    # => i_in = H_in/2 + (y_in / pixel_size).
-    #
-    # Аналогично по горизонтали. Но тут предположим:
-    #   x-координаты напрямую заданы a,b. Если предмет размер W_in,
-    #   то "горизонтальную" координату (j_in) тоже масштабируем тем же M.
-    #
-    # Здесь, для простоты, «плоскость предмета» и «экран» считаем параллельными,
-    #   т.е. вертикальные оси совпадают, горизонтальные оси совпадают.
-    
-    # Коэффициент для перевода y_out -> y_in:
-    #   y_in = (a / b) * y_out.
-    # Но M = -b / a => a/b = -1/M
-    # => y_in = - (1/M) * y_out
-    # Также по горизонтали x_in = - (1/M) * x_out
-    
-    # Потери интенсивности T (например, T~0.9...0.95 если хотим учесть отражения на 2 границах)
-    
-    # Выполним «обратное отображение»:
-    for i_out in range(H_out):
-        # координата y_out
-        y_out = (i_out - H_out/2) * pixel_size
-        # Находим соответствующую y_in
-        y_in = - (1.0/M) * y_out  # y_in = (a/b)*y_out, но M= - b/a => a/b= -1/M
-        # индекс i_in в пикселях:
-        i_in = int(H_in/2 + (y_in / pixel_size))
-        
-        # По горизонтали
-        for j_out in range(W_out):
-            x_out = (j_out - W_out/2) * pixel_size
-            x_in = - (1.0/M) * x_out
-            j_in = int(W_in/2 + (x_in / pixel_size))
+    output_image = np.zeros((H_out, W_out, 3), dtype=np.uint8)
+
+
+    # отдельно считаем для центра картинки 
+    color = input_image[H_in // 2, W_in // 2]
+    val = (color).astype(np.uint8)
+    output_image[int(np.round(H_out / 2)), int(np.round(W_out / 2))] = val
+
+    for i_in in range(H_in):
+        for j_in in range(W_in):
+            y_in = i_in - H_in / 2
+            x_in = j_in - W_in / 2
+            # рассмотрим ход лучей в плоскости 
+            #                           точка на картине
+            #                           главная оптическа ось 
+
+            # луч 1 проходит через точку и центр линзы и не преломляется
+            # луч 2 проходит параллельно оптической оси линзы
+            #   и преломлятся в фокус
+
+            l1 = make_lines_two_points(np.array([0, 0, 0]), np.array([x_in, y_in, -a]))
+            l2 = make_lines_two_points(np.array([0, 0, f]), np.array([x_in, y_in, 0]))
+
+            out_point = l1.intersection(l2)
+            if out_point is None:
+                # print("Паралельные лучи из точки: ", i_in, j_in)
+                continue
+            error.append(out_point[2] - b)
             
-            # Если (i_in, j_in) в пределах исходного изображения, то берём цвет
+            i_out, j_out = int(np.round(out_point[1] + H_out / 2)),  int(np.round(out_point[0] + W_out / 2))
+
+            if 0 <= i_out < H_out and 0 <= j_out < W_out:
+                color = input_image[i_in, j_in]
+
+                val = (color).astype(np.uint8)
+                output_image[i_out, j_out] = val
+    
+    return output_image, b, M, sum(error)/len(error)
+
+
+def thin_lens_image_output_lines(
+    input_image: np.ndarray,
+    f: float,
+    a: float
+):
+    H_in, W_in = input_image.shape[:2]
+    error = [0]
+    try:
+        b = (a * f) / (a - f)
+    except ZeroDivisionError:
+        b = 50 # типо бесконечность 
+    
+
+    M = b / - a   # Увеличение изображение
+                # Если M > 0 то     перевернутое    действительное
+                # Если M < 0 то     прямое          мнимое
+    
+    
+    output_image = np.zeros((H_out, W_out, 3), dtype=np.uint8)
+
+    # отдельно считаем для центра картинки 
+    color = input_image[H_in // 2, W_in // 2]
+    val = (color).astype(np.uint8)
+    output_image[int(np.round(H_out / 2)), int(np.round(W_out / 2))] = val
+
+    for i_out in range(H_out):
+        for j_out in range(W_out):
+            y_out = i_out - H_out / 2
+            x_out = j_out - W_out / 2
+            # рассмотрим ход лучей в плоскости 
+            #                           точка на картине
+            #                           главная оптическа ось 
+
+            # луч 1 проходит через точку и центр линзы и не преломляется
+            # луч 2 проходит параллельно оптической оси линзы
+            #   и преломлятся в фокус
+
+            l1 = make_lines_two_points(np.array([0, 0, 0]), np.array([x_out, y_out, b]))
+            l2 = make_lines_two_points(np.array([0, 0, -f]), np.array([x_out, y_out, 0]))
+            inp_img_plane = Plane(0, 0, 1, a) # точки на плоскости картины
+
+            in_point_1 = inp_img_plane.intersection_with_line(l1)
+            in_point_2 = inp_img_plane.intersection_with_line(l2)
+            error.append(in_point_1 - in_point_2)
+            in_point = (in_point_1 + in_point_2) / 2
+            if in_point is None:
+                # print("Паралельные лучи из точки: ", i_out, j_out)
+                continue
+            # error.append(in_point[2] - a)
+            
+            i_in, j_in = int(np.round(in_point[1] + H_in / 2)),  int(np.round(in_point[0] + W_in / 2))
+
             if 0 <= i_in < H_in and 0 <= j_in < W_in:
                 color = input_image[i_in, j_in]
-                # Учтем потери (T)
-                if color.ndim == 0:  # ч/б
-                    val = int(color * T)
-                    output_image[i_out, j_out] = val
-                else:
-                    # RGB
-                    val = (color * T).astype(np.uint8)
-                    output_image[i_out, j_out] = val
-            else:
-                # Иначе фон (чёрный)
-                pass
+
+                val = (color).astype(np.uint8)
+                output_image[i_out, j_out] = val
     
-    return output_image, b, M
+    return output_image, b, M, sum(error)/len(error)
 
 
 if __name__ == "__main__":
-    # Пример использования
-    # Загрузим картинку "input.jpg" из текущей директории (не забудьте поместить её туда).
-    img_in = Image.open("input.jpg")
-    img_in_np = np.array(img_in)  # numpy массив
-    
-    # Параметры лупы (тонкой линзы)
-    f_lens = 2.5   # фокусное расстояние, условные единицы
-    a_obj = 2.0    # расстояние предмета до линзы, условные единицы
-    T_loss = 0.95  # Коэффициент пропускания
-    
-    # Запуск преобразования
-    out, b_dist, M_factor = thin_lens_image(
-        img_in_np, f_lens, a_obj,
-        pixel_size=1.0,
-        T=T_loss
+    img_in = Image.open("/Users/lida-os/mipt/physic/Physics-2025/M3_task/pixel_art.jpg")
+    img_in_np = np.array(img_in) 
+        
+    # Параметры тонкой линзы
+    f_lens = 8   
+    a_obj = 2
+        
+        # Запуск преобразования
+    out, b_dist, M_factor, error = thin_lens_image_input_lines(
+        img_in_np, f_lens, a_obj
     )
     
-    print(f"Тонкая линза: f={f_lens}, a={a_obj}, b={b_dist:.2f}, M={M_factor:.2f}")
+    another_out, _, _, error_2 = thin_lens_image_output_lines(
+        img_in_np, f_lens, a_obj
+    )
+
     if b_dist > 0:
-        print("Действительное изображение (b > 0), перевёрнутое (M < 0 => инвертируется по вертикали).")
+        print(f"Действительное изображение, b={b_dist:.3f} > 0")
     else:
-        print("Мнимое изображение (b < 0): находится по ту же сторону линзы, увеличение |M|.")
-    
-    # Преобразуем массив обратно в PIL-изображение и сохраним
+        print(f'Мнимое изображение, b={b_dist:.3f} < 0')
+    print(f"Увеличение M={M_factor:.3f}")
+    print(f'Ошибка в расчете координаты итоговой картинки 1 = {error}')
+    print(f'Ошибка в расчете координаты итоговой картинки 2 = {np.sqrt(sum(i*i for i in list(error_2))) / len(error_2)}')
+
     img_out = Image.fromarray(out)
-    img_out.save("output_lens.jpg")
+    img_out.save("/Users/lida-os/mipt/physic/Physics-2025/M3_task/output_lens.jpg")
+
+    img_out_another = Image.fromarray(another_out)
+    img_out_another.save("/Users/lida-os/mipt/physic/Physics-2025/M3_task/output_lens_another.jpg")
+        
+
+    # Попытка сделать микроскоп 
+
+
+    f1, f2 = 2, 4
+    L = 10
+    a = 3
+
+    H_out = 500 # считаем осью OY
+    W_out = 500 # считаем осью OX
+
+
+    # mic_out_1, b_1, M_mic_1, error_mic = thin_lens_image_input_lines(
+    #     img_in_np, f1, a
+    # )
+    # делаем красиво
+    mic_out_1, b_1, M_mic_1, error_mic = thin_lens_image_output_lines(
+        img_in_np, f1, a
+    )
     
-    # Сравним с простым скейлом (увеличением) в тот же размер:
-    # Возьмем масштаб по модулю |M|:
-    scale_factor = abs(M_factor)
-    W_in, H_in = img_in.size
-    W_sc = int(W_in * scale_factor)
-    H_sc = int(H_in * scale_factor)
-    img_scaled = img_in.resize((W_sc, H_sc), Image.Resampling.LANCZOS)
-    
+    if b_1 > 0:
+        print(f"Действительное изображение, b={b_1:.3f} > 0")
+    else:
+        print(f'Мнимое изображение, b={b_1:.3f} < 0')
+
+    mic_out_2, b_2, M_mic_2, error_mic = thin_lens_image_output_lines(
+        mic_out_1, f2, L-b_1
+    )
+    if b_2 > 0:
+        print(f"Действительное изображение, b={b_2:.3f} > 0")
+    else:
+        print(f'Мнимое изображение, b={b_2:.3f} < 0')
+    print(f"Увеличение M1={M_mic_1:.3f}, M2={M_mic_2:.3f}")
+    print(f'Ошибка в расчете координаты итоговой картинки 1 = {error_mic}')
+
+
     # Покажем всё на matplotlib:
-    fig, axs = plt.subplots(1, 3, figsize=(12, 4))
-    axs[0].imshow(img_in_np)
-    axs[0].set_title("Исходное изображение")
-    axs[0].axis("off")
-    
-    axs[1].imshow(img_out)
-    axs[1].set_title("После тонкой линзы")
-    axs[1].axis("off")
-    
-    axs[2].imshow(img_scaled)
-    axs[2].set_title("Просто увеличение")
-    axs[2].axis("off")
-    
+    fig, axs = plt.subplots(2, 3, figsize=(12, 4), facecolor='lightgray')
+    axs[0, 0].imshow(img_in_np)
+    axs[0, 0].set_title("Исходное изображение")
+    axs[0, 0].axis("off")
+
+    axs[0, 1].imshow(img_out)
+    axs[0, 1].set_title("После тонкой линзы")
+    axs[0, 1].axis("off")
+
+    axs[0, 2].imshow(img_out_another)
+    axs[0, 2].set_title("После тонкой линзы")
+    axs[0, 2].axis("off")
+
+    axs[1, 0].imshow(mic_out_1)
+    axs[1, 0].set_title("После микроскопа середина")
+    axs[1, 0].axis("off")
+
+    axs[1, 1].imshow(mic_out_2)
+    axs[1, 1].set_title("После микроскопа финал")
+    axs[1, 1].axis("off")
+
     plt.tight_layout()
     plt.show()
