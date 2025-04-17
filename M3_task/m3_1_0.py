@@ -196,14 +196,6 @@ if __name__ == "__main__":
     L = 10
     a = 3
 
-    H_out = 500 # считаем осью OY
-    W_out = 500 # считаем осью OX
-
-
-    # mic_out_1, b_1, M_mic_1, error_mic = thin_lens_image_input_lines(
-    #     img_in_np, f1, a
-    # )
-    # делаем красиво
     mic_out_1, b_1, M_mic_1, error_mic = thin_lens_image_output_lines(
         img_in_np, f1, a
     )
@@ -212,6 +204,9 @@ if __name__ == "__main__":
         print(f"Действительное изображение, b={b_1:.3f} > 0")
     else:
         print(f'Мнимое изображение, b={b_1:.3f} < 0')
+
+    H_out = 500 # считаем осью OY
+    W_out = 500 # считаем осью OX
 
     mic_out_2, b_2, M_mic_2, error_mic = thin_lens_image_output_lines(
         mic_out_1, f2, L-b_1
@@ -224,8 +219,43 @@ if __name__ == "__main__":
     print(f'Ошибка в расчете координаты итоговой картинки 1 = {error_mic}')
 
 
+    # делаем телескоп 
+
+    big_img_in = Image.open("/Users/lida-os/mipt/physic/Physics-2025/M3_task/big_picture.jpg")
+    big_img_in_np = np.array(big_img_in) 
+
+    f1, f2 = 2, 4
+    L = 6
+    a = 50
+    H_out = 32 # считаем осью OY
+    W_out = 32 # считаем осью OX
+
+    tel_out_1, b_1, M_tel_1, error_tel = thin_lens_image_output_lines(
+        big_img_in_np, f1, a
+    )
+    
+    if b_1 > 0:
+        print(f"Действительное изображение, b={b_1:.3f} > 0")
+    else:
+        print(f'Мнимое изображение, b={b_1:.3f} < 0')
+
+
+    H_out = 500 
+    W_out = 500 
+
+    tel_out_2, b_2, M_tel_2, error_tel = thin_lens_image_output_lines(
+        tel_out_1, f2, L-b_1
+    )
+    if b_2 > 0:
+        print(f"Действительное изображение, b={b_2:.3f} > 0")
+    else:
+        print(f'Мнимое изображение, b={b_2:.3f} < 0')
+    print(f"Увеличение M1={M_tel_1:.3f}, M2={M_tel_2:.3f}")
+    print(f'Ошибка в расчете координаты итоговой картинки 1 = {error_tel}')
+
+
     # Покажем всё на matplotlib:
-    fig, axs = plt.subplots(2, 3, figsize=(12, 4), facecolor='lightgray')
+    fig, axs = plt.subplots(3, 3, figsize=(12, 4), facecolor='lightgray')
     axs[0, 0].imshow(img_in_np)
     axs[0, 0].set_title("Исходное изображение")
     axs[0, 0].axis("off")
@@ -245,6 +275,18 @@ if __name__ == "__main__":
     axs[1, 1].imshow(mic_out_2)
     axs[1, 1].set_title("После микроскопа финал")
     axs[1, 1].axis("off")
+
+    axs[2, 0].imshow(tel_out_1)
+    axs[2, 0].set_title("После телескопа середина")
+    axs[2, 0].axis("off")
+
+    axs[2, 1].imshow(tel_out_2)
+    axs[2, 1].set_title("После телескопа финал")
+    axs[2, 1].axis("off")
+
+    axs[2, 2].imshow(big_img_in)
+    axs[2, 2].set_title("Исходное")
+    axs[2, 2].axis("off")
 
     plt.tight_layout()
     plt.show()
