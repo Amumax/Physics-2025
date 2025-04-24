@@ -1,0 +1,206 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english,russian]{babel}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings} % Для вставки фрагментов кода, если нужно
+\geometry{top=2cm, left=2cm, right=2cm, bottom=2cm}
+
+\title{Отчёт по задаче: Моделирование линий, плоскостей и оптических приборов \\(интерпретация через трёхмерные прямые)}
+\author{Автор: Иванов И.И.}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Постановка задачи}
+
+Требуется изучить следующие аспекты:
+\begin{enumerate}
+  \item \textbf{Задание прямой} в трёхмерном пространстве в параметрической форме:
+  \[
+    \mathbf{v}(t) = \mathbf{P} + t\, \mathbf{d},
+  \]
+  где $\mathbf{P}=(x_0,y_0,z_0)$ --- точка на прямой, $\mathbf{d}=(n,m,p)$ --- направляющий вектор.
+  \item \textbf{Пересечение двух прямых} в пространстве --- решение системы
+  \[
+    \begin{cases}
+      x_{01} + t\,n_1 = x_{02} + s\,n_2,\\
+      y_{01} + t\,m_1 = y_{02} + s\,m_2,\\
+      z_{01} + t\,p_1 = z_{02} + s\,p_2.
+    \end{cases}
+  \]
+  Если решение существует (и прямые не параллельны/не скрещены), получаем точку пересечения $\mathbf{r}^{\star}$.
+  \item \textbf{Пересечение прямой с плоскостью}, заданной уравнением
+  \[
+    A\,x + B\,y + C\,z + D = 0.
+  \]
+  Подстановка параметрического уравнения прямой даёт значение $t$.
+  \item \textbf{Применение} полученных формул к простым оптическим системам (тонкая линза, микроскоп, телескоп) --- путём «трассировки лучей» в приближении 2D/3D.
+\end{enumerate}
+
+\section{Теоретические основы}
+
+\subsection{Параметрическая форма прямой}
+
+В трёхмерном пространстве $\mathbb{R}^3$ \textbf{прямая} может быть задана векторно:
+\[
+  \mathbf{r}(t) = \mathbf{P} + t\, \mathbf{d}, 
+\]
+где $t\in \mathbb{R}$, $\mathbf{P}=(x_0,y_0,z_0)$, $\mathbf{d}=(d_x,d_y,d_z)$.
+
+Скалярно (по координатам) это
+\[
+  \begin{cases}
+    x(t) = x_0 + t\,d_x, \\
+    y(t) = y_0 + t\,d_y, \\
+    z(t) = z_0 + t\,d_z.
+  \end{cases}
+\]
+
+\subsection{Пересечение прямых}
+
+Рассмотрим две прямые:
+\[
+  \mathbf{r}_1(t) = \mathbf{P}_1 + t\,\mathbf{d}_1, 
+  \quad
+  \mathbf{r}_2(s) = \mathbf{P}_2 + s\,\mathbf{d}_2.
+\]
+Пересечение означает, что существует $(t^{\star}, s^{\star})$ такое, что 
+\(
+  \mathbf{r}_1(t^{\star}) = \mathbf{r}_2(s^{\star}).
+\)
+В координатном виде:
+\[
+  \begin{cases}
+  x_{01} + t\,d_{1x} = x_{02} + s\,d_{2x},\\
+  y_{01} + t\,d_{1y} = y_{02} + s\,d_{2y},\\
+  z_{01} + t\,d_{1z} = z_{02} + s\,d_{2z}.
+  \end{cases}
+\]
+Решая эту систему относительно $(t,s)$, находим при наличии решения точку пересечения.
+
+\subsection{Пересечение прямой с плоскостью}
+
+Пусть плоскость задана уравнением
+\[
+  A\,x + B\,y + C\,z + D = 0.
+\]
+Подставляя параметры прямой $\mathbf{r}(t) = \mathbf{p} + t\,\mathbf{d}$, получаем скалярное уравнение:
+\[
+  A(x_0 + t\,d_x) + B(y_0 + t\,d_y) + C(z_0 + t\,d_z) + D = 0,
+\]
+\[
+  t\,(A\,d_x + B\,d_y + C\,d_z) = - \bigl(A\,x_0 + B\,y_0 + C\,z_0 + D\bigr).
+\]
+Если знаменатель $A\,d_x + B\,d_y + C\,d_z\neq 0$, то
+\[
+  t^{\star} = -\frac{A\,x_0 + B\,y_0 + C\,z_0 + D}{A\,d_x + B\,d_y + C\,d_z}.
+\]
+Тогда точка пересечения: 
+\(
+  \mathbf{r}(t^{\star})=\mathbf{p}+ t^{\star}\mathbf{d}.
+\)
+
+\section{Численная реализация и ход лучей в модели <<тонкой линзы>>}
+
+В прилагаемом \texttt{Jupyter Notebook} (см. листинг или файл) мы реализовали классы:
+\begin{itemize}
+  \item \textbf{\texttt{Line}} --- хранит информацию о прямой (\texttt{offset}, \texttt{multiply}) и методы:
+    \begin{itemize}
+      \item \texttt{get\_dot(t)} --- получение координат точки при параметре $t$;
+      \item \texttt{intersection(other)} --- решение системы для пересечения с другой прямой.
+    \end{itemize}
+  \item \textbf{\texttt{Plane}} --- задаёт плоскость с параметрами $(A,B,C,D)$ и метод \texttt{intersection\_with\_line(line)}, возвращающий точку пересечения.
+\end{itemize}
+
+Для **оптической** задачи (тонкая линза, микроскоп, телескоп):
+\begin{enumerate}
+    \item \textbf{Тонкая линза} рассматривается как:
+      \begin{itemize}
+       \item Луч 1: проходит через точку предмета и центр линзы (не преломляется).
+       \item Луч 2: параллелен оптической оси, затем проходит через фокус.
+      \end{itemize}
+      Пересечение этих двух лучей даёт положение соответствующей точки изображения.
+    \item \textbf{Микроскоп, телескоп} строятся последовательно: изображение, сформированное первой линзой, становится «предметом» для второй и т.д. При этом требуется несколько раз вызвать функцию преобразования.
+\end{enumerate}
+
+\section{Основные фрагменты кода}
+
+Ниже для примера приводим несколько ключевых строк. Полный код см. в ноутбуке:
+
+\begin{lstlisting}[language=Python, basicstyle=\small]
+class Line:
+    def __init__(self, x0, y0, z0, m, n, p):
+        self.offset = np.array([x0, y0, z0], dtype=float)
+        self.multiply = np.array([m, n, p], dtype=float)
+
+    def get_dot(self, t):
+        return self.offset + t * self.multiply
+
+    def intersection(self, other):
+        A = np.array([self.multiply, -other.multiply, 
+                      np.cross(self.multiply, other.multiply)]).T
+        B = other.offset - self.offset
+        try:
+            t, s, _ = np.linalg.solve(A, B)
+        except np.linalg.LinAlgError:
+            return None
+        return self.get_dot(t)
+\end{lstlisting}
+
+\begin{lstlisting}[language=Python, basicstyle=\small]
+def thin_lens_image_input_lines(
+    input_image, f, a
+):
+    # вычисляем b = (a*f)/(a-f)
+    # строим лучи: один через центр линзы, другой параллельно оси
+    # ...
+    # возвращаем выходное изображение
+    return output_image, b, M, error
+\end{lstlisting}
+
+\section{Результаты}
+
+В ноутбуке продемонстрировано несколько сценариев:
+
+\subsection{1. Тонкая линза}
+
+Исходное изображение (рис.~\ref{fig:lens_in}) проходит через лупу (тонкую линзу) при заданных $f$ и $a$. Результат --- увеличенное (или уменьшенное) изображение, которое может оказаться перевёрнутым, если $a>f$ (действительное изображение).
+
+\subsection{2. Микроскоп}
+
+Состоит из двух линз (объектив и окуляр), расположенных на некотором расстоянии. Пошагово получаем:
+\begin{enumerate}
+  \item Промежуточное изображение, даваемое объективом,
+  \item Финальное увеличенное изображение после окуляра.
+\end{enumerate}
+В ноутбуке выведены результаты в виде двух-трёх картинок.
+
+\subsection{3. Телескоп}
+
+По аналогии: также две линзы, но настраиваем их так, чтобы параллельные лучи на входе давали параллельные лучи на выходе. Угловое увеличение $\gamma = f_{\text{об}} / f_{\text{ок}}$.
+
+\section{Выводы}
+
+\begin{enumerate}
+  \item Реализован базовый инструментарий для определения \textbf{пересечения прямых и плоскостей} в 3D-пространстве.
+  \item Данный инструментарий применён для \textbf{трассировки лучей} в простейших оптических моделях (тонкая линза, микроскоп, телескоп).
+  \item Код позволяет ``проецировать'' цифровые изображения (набор точек) через модель оптической системы, получая новое (искажённое, увеличенное) изображение.
+  \item Подобный подход может быть расширен для более сложных систем, многократных отражений/преломлений и реальных (толстых) линз.
+\end{enumerate}
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.32\textwidth]{example_in.png}
+  \includegraphics[width=0.32\textwidth]{example_out1.png}
+  \includegraphics[width=0.32\textwidth]{example_out2.png}
+  \caption{Пример: исходное изображение (слева), промежуточное (по первой линзе) и финальное изображение (по второй линзе).}
+  \label{fig:lens_in}
+\end{figure}
+
+\end{document}
